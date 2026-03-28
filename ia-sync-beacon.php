@@ -21,7 +21,7 @@ class IA_Sync_Beacon {
 
 	const OPT_REMOTE       = 'iaxsp_remote_site';
 	const OPT_PRIMARY_TAG  = 'iaxsp_tag_slugs'; // The tag that triggers sync
-	const OPT_TAG_MAPPING  = 'iaxsp_tag_to_cat_mapping'; // New mapping: "remote-tag:local-cat-slug"
+	const OPT_TAG_MAPPING  = 'iaxsp_tag_to_tag_mapping'; // Mapping: "remote-tag:local-tag-slug"
 	const OPT_DEFAULT_CAT  = 'iaxsp_default_category';
 	const OPT_AUTHOR       = 'iaxsp_author_id';
 	const OPT_SYNC_LOG     = 'iaxsp_sync_log';
@@ -97,10 +97,10 @@ class IA_Sync_Beacon {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row">Category Mappings</th>
+						<th scope="row">Tag Mappings</th>
 						<td>
-							<textarea name="<?php echo self::OPT_TAG_MAPPING; ?>" rows="5" class="large-text" placeholder="staff:staff-updates&#10;news:latest-news"><?php echo esc_textarea( $mapping ); ?></textarea>
-							<p class="description">One per line: <code>remote-tag-slug:local-category-slug</code>. If a post has multiple tags, the first matching rule wins.</p>
+							<textarea name="<?php echo self::OPT_TAG_MAPPING; ?>" rows="5" class="large-text" placeholder="staff:staff-tag&#10;news:latest-news-tag"><?php echo esc_textarea( $mapping ); ?></textarea>
+							<p class="description">One per line: <code>remote-tag-slug:local-tag-slug</code>. If a post has multiple tags, the first matching rule wins.</p>
 						</td>
 					</tr>
 					<tr>
@@ -200,8 +200,8 @@ class IA_Sync_Beacon {
 				$log .= "    Created new post (Local ID: $local_id).\n";
 			}
 
-			// Apply Categories
-			$this->resolve_categories( $local_id, $rp );
+			// Apply Taxonomies (Category & Tags)
+			$this->assign_taxonomies( $local_id, $rp );
 
 			// Localize Media
 			if ( function_exists( 'ia_beacon_localize_media_in_content' ) ) {
@@ -231,7 +231,7 @@ class IA_Sync_Beacon {
 		return $query->posts ? $query->posts[0] : null;
 	}
 
-	private function resolve_categories( $post_id, $remote_post ) {
+	private function assign_taxonomies( $post_id, $remote_post ) {
 		$mappings_raw = get_option( self::OPT_TAG_MAPPING, '' );
 		$mappings     = [];
 		foreach ( explode( "\n", str_replace( "\r", "", $mappings_raw ) ) as $line ) {
@@ -241,7 +241,7 @@ class IA_Sync_Beacon {
 			}
 		}
 
-		// Get all remote tag slugs
+		/* 1. Get all remote tag slugs */
 		$remote_tags = [];
 		if ( ! empty( $remote_post->_embedded->{'wp:term'} ) ) {
 			foreach ( $remote_post->_embedded->{'wp:term'} as $term_group ) {
@@ -253,15 +253,21 @@ class IA_Sync_Beacon {
 			}
 		}
 
-		$target_cat_slug = get_option( self::OPT_DEFAULT_CAT, 'uncategorized' );
-		foreach ( $mappings as $tag_slug => $cat_slug ) {
-			if ( in_array( $tag_slug, $remote_tags ) ) {
-				$target_cat_slug = $cat_slug;
-				break; // First match wins
+		/* 2. Resolve Local Tags based on mapping */
+		$target_tags = [];
+		foreach ( $mappings as $remote_tag => $local_tag ) {
+			if ( in_array( $remote_tag, $remote_tags ) ) {
+				$target_tags[] = $local_tag;
 			}
 		}
 
-		// Ensure category exists locally
+		/* 3. Ensure Local Tags exist and assign them */
+		if ( ! empty( $target_tags ) ) {
+			wp_set_post_tags( $post_id, $target_tags, true ); // Append tags
+		}
+
+		/* 4. Assign Default Category (as fallback or primary) */
+		$target_cat_slug = get_option( self::OPT_DEFAULT_CAT, 'uncategorized' );
 		$cat = get_term_by( 'slug', $target_cat_slug, 'category' );
 		if ( ! $cat ) {
 			$new_cat = wp_insert_term( ucwords( str_replace( "-", " ", $target_cat_slug ) ), 'category', [ 'slug' => $target_cat_slug ] );
