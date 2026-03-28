@@ -1,0 +1,15 @@
+# WordPress stuff
+wp-config.php
+wp-content/uploads/
+wp-content/cache/
+wp-content/upgrade/
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Project specific
+tests/
+*.log
+.env
+.vscode/
+.idea/
