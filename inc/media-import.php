@@ -133,7 +133,8 @@ function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 		$val = trim( $img->getAttribute( $a ) );
 		/* Skip empty values and base64 placeholders */
 		if ( $val && strpos( $val, 'data:' ) !== 0 ) {
-			return $val;
+			/* If it looks like a srcset (contains spaces), only take the first URL */
+			return strtok( $val, ' ' ) ?: '';
 		}
 	}
 
@@ -141,12 +142,13 @@ function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 	for ( $i = 0; $i < $img->attributes->length; $i++ ) {
 		$attr = $img->attributes->item($i);
 		$val  = trim( $attr->nodeValue );
-		if ( $val && strpos( $val, 'data:' ) !== 0 && preg_match( '/\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i', $val ) ) {
-			return $val;
+		/* Skip placeholders and very long strings that aren't URLs */
+		if ( $val && strpos( $val, 'data:' ) !== 0 && preg_match( '/\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?/i', $val ) ) {
+			return strtok( $val, ' ' ) ?: '';
 		}
 	}
 
-	/* 3. Fallback to first URL in srcset if everything else is a placeholder */
+	/* 3. Fallback to first URL in srcset (final check) */
 	if ( $srcset = $img->getAttribute( 'srcset' ) ) {
 		$first = strtok( trim( $srcset ), ' ,' ) ?: '';
 		if ( $first && strpos( $first, 'data:' ) !== 0 ) {
