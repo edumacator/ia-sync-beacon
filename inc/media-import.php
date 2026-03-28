@@ -22,9 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /*  Config & constants                                                */
 /* ------------------------------------------------------------------ */
 
-if ( ! defined( 'IA_BEACON_HUB_HOST' ) ) {
-	define( 'IA_BEACON_HUB_HOST', 'foundation.fcsia.com' );
-}
+/* No hardcoded IA_BEACON_HUB_HOST – we pull this dynamically from settings now */
 const IA_BEACON_HASH_META = '_ia_beacon_content_hash';
 const IA_BEACON_SOURCE_URL_META = '_ia_beacon_source_url';
 
@@ -103,8 +101,11 @@ function ia_beacon_import_featured_image( int $featured_media_id, int $dest_post
 		return;
 	}
 
+	$remote_url = untrailingslashit( get_option( 'iaxsp_remote_site' ) );
+	if ( ! $remote_url ) { return; }
+
 	$resp = wp_remote_get(
-		sprintf( 'https://%s/wp-json/wp/v2/media/%d', IA_BEACON_HUB_HOST, $featured_media_id )
+		sprintf( '%s/wp-json/wp/v2/media/%d', $remote_url, $featured_media_id )
 	);
 	if ( is_wp_error( $resp ) ) { return; }
 
@@ -162,8 +163,14 @@ function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 function ia_beacon_localize_media_in_content(
 	string $html,
 	int    $post_id,
-	string $source_domain = IA_BEACON_HUB_HOST
+	string $source_domain = ''
 ) : string {
+
+	/* Fallback if no domain passed (e.g. from the save_post hook) */
+	if ( empty( $source_domain ) ) {
+		$source_domain = parse_url( get_option( 'iaxsp_remote_site' ), PHP_URL_HOST );
+	}
+	if ( empty( $source_domain ) ) { return $html; }
 
 	/* Skip everything but lazy-load fix when opt-out constant is set */
 	$import_media = ! ( defined( 'IA_BEACON_SKIP_MEDIA_IMPORT' ) && IA_BEACON_SKIP_MEDIA_IMPORT );
