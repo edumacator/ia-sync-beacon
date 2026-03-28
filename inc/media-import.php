@@ -127,15 +127,32 @@ function ia_beacon_import_featured_image( int $featured_media_id, int $dest_post
 function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 
 	/* Prioritize lazy attributes over placeholder src */
-	$attrs = [ 'data-lazy-src', 'data-src', 'data-original', 'data-lazy', 'data-lazyload', 'src' ];
+	$attrs = [ 
+		'data-lazy-src', 
+		'data-src', 
+		'data-original', 
+		'data-lazy', 
+		'data-lazyload', 
+		'data-srcset', 
+		'src' 
+	];
 
 	foreach ( $attrs as $a ) {
-		if ( $val = $img->getAttribute( $a ) ) { return trim( $val ); }
+		$val = trim( $img->getAttribute( $a ) );
+		/* Skip empty values and base64 placeholders */
+		if ( $val && strpos( $val, 'data:' ) !== 0 ) {
+			return $val;
+		}
 	}
 
+	/* Fallback to first URL in srcset if everything else is a placeholder */
 	if ( $srcset = $img->getAttribute( 'srcset' ) ) {
-		return strtok( trim( $srcset ), ' ,' ) ?: '';
+		$first = strtok( trim( $srcset ), ' ,' ) ?: '';
+		if ( $first && strpos( $first, 'data:' ) !== 0 ) {
+			return $first;
+		}
 	}
+
 	return '';
 }
 
