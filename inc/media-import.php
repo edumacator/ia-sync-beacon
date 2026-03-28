@@ -126,18 +126,9 @@ function ia_beacon_import_featured_image( int $featured_media_id, int $dest_post
 /* ------------------------------------------------------------------ */
 function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 
-	/* Prioritize lazy attributes over placeholder src */
-	$attrs = [ 
-		'data-lazy-src', 
-		'data-src', 
-		'data-original', 
-		'data-lazy', 
-		'data-lazyload', 
-		'data-srcset', 
-		'src' 
-	];
-
-	foreach ( $attrs as $a ) {
+	/* 1. Prioritize known lazy attributes first */
+	$known_attrs = [ 'data-lazy-src', 'data-src', 'data-original', 'data-lazy', 'data-lazyload', 'data-srcset', 'src' ];
+	foreach ( $known_attrs as $a ) {
 		$val = trim( $img->getAttribute( $a ) );
 		/* Skip empty values and base64 placeholders */
 		if ( $val && strpos( $val, 'data:' ) !== 0 ) {
@@ -145,7 +136,16 @@ function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 		}
 	}
 
-	/* Fallback to first URL in srcset if everything else is a placeholder */
+	/* 2. Greedy search: Look at EVERY attribute for anything that looks like an image URL */
+	for ( $i = 0; $i < $img->attributes->length; $i++ ) {
+		$attr = $img->attributes->item($i);
+		$val  = trim( $attr->nodeValue );
+		if ( $val && strpos( $val, 'data:' ) !== 0 && preg_match( '/\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i', $val ) ) {
+			return $val;
+		}
+	}
+
+	/* 3. Fallback to first URL in srcset if everything else is a placeholder */
 	if ( $srcset = $img->getAttribute( 'srcset' ) ) {
 		$first = strtok( trim( $srcset ), ' ,' ) ?: '';
 		if ( $first && strpos( $first, 'data:' ) !== 0 ) {
