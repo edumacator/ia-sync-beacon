@@ -26,6 +26,7 @@ if ( ! defined( 'IA_BEACON_HUB_HOST' ) ) {
 	define( 'IA_BEACON_HUB_HOST', 'foundation.fcsia.com' );
 }
 const IA_BEACON_HASH_META = '_ia_beacon_content_hash';
+const IA_BEACON_SOURCE_URL_META = '_ia_beacon_source_url';
 
 /* ------------------------------------------------------------------ */
 /*  Sideload any remote file (with fallback)                           */
@@ -35,9 +36,30 @@ function ia_beacon_sideload_file( string $url, int $post_id, string $desc = '' )
 	$url          = preg_replace( '#^http://#i', 'https://', trim( $url ) );
 	$original_url = $url; // keep for fallback
 
-	/* Already imported? */
-	if ( $existing = attachment_url_to_postid( $url ) ) {
-		return [ 'url' => wp_get_attachment_url( $existing ), 'id' => $existing ];
+	/* 1. Already imported? Check by source URL meta (more reliable than attachment_url_to_postid) */
+	$existing = get_posts( [
+		'post_type'      => 'attachment',
+		'posts_per_page' => 1,
+		'post_status'    => 'inherit',
+		'meta_query'     => [
+			[
+				'key'     => IA_BEACON_SOURCE_URL_META,
+				'value'   => $original_url,
+				'compare' => '=',
+			],
+		],
+		'fields'         => 'ids',
+	] );
+
+	if ( ! empty( $existing ) ) {
+		$att_id = $existing[0];
+		return [ 'url' => wp_get_attachment_url( $att_id ), 'id' => $att_id ];
+	}
+
+	/* 2. Fallback check by local URL if it was somehow renamed or meta missing */
+	if ( $existing_by_url = attachment_url_to_postid( $url ) ) {
+		update_post_meta( $existing_by_url, IA_BEACON_SOURCE_URL_META, $original_url );
+		return [ 'url' => wp_get_attachment_url( $existing_by_url ), 'id' => $existing_by_url ];
 	}
 
 	/* Skip download entirely if global opt-out is set */
@@ -47,6 +69,7 @@ function ia_beacon_sideload_file( string $url, int $post_id, string $desc = '' )
 
 	$tmp = download_url( $url );
 	if ( is_wp_error( $tmp ) ) {
+		error_log( sprintf( '[IA Beacon] Failed download_url for %s: %s', $url, $tmp->get_error_message() ) );
 		/* Fallback: return the hub URL so the <img> still works */
 		return [ 'url' => $original_url, 'id' => 0 ];
 	}
@@ -60,9 +83,13 @@ function ia_beacon_sideload_file( string $url, int $post_id, string $desc = '' )
 
 	if ( is_wp_error( $att_id ) ) {
 		@unlink( $tmp );
+		error_log( sprintf( '[IA Beacon] Failed media_handle_sideload for %s: %s', $url, $att_id->get_error_message() ) );
 		/* Fallback again */
 		return [ 'url' => $original_url, 'id' => 0 ];
 	}
+
+	/* Save source URL for future duplicate checks */
+	update_post_meta( $att_id, IA_BEACON_SOURCE_URL_META, $original_url );
 
 	return [ 'url' => wp_get_attachment_url( $att_id ), 'id' => $att_id ];
 }
@@ -99,8 +126,8 @@ function ia_beacon_import_featured_image( int $featured_media_id, int $dest_post
 /* ------------------------------------------------------------------ */
 function ia_beacon_get_real_img_src( DOMElement $img ) : string {
 
-	$attrs = [ 'src', 'data-src', 'data-lazy-src', 'data-original',
-	           'data-lazy', 'data-lazyload' ];
+	/* Prioritize lazy attributes over placeholder src */
+	$attrs = [ 'data-lazy-src', 'data-src', 'data-original', 'data-lazy', 'data-lazyload', 'src' ];
 
 	foreach ( $attrs as $a ) {
 		if ( $val = $img->getAttribute( $a ) ) { return trim( $val ); }
@@ -126,7 +153,16 @@ function ia_beacon_localize_media_in_content(
 
 	libxml_use_internal_errors( true );
 	$doc = new DOMDocument();
-	$doc->loadHTML( $html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD );
+	
+	/* 
+	 * SAFE UTF-8 Loading: 
+	 * We prepend a meta tag instead of using mb_convert_encoding to avoid 
+	 * dependency on the mbstring extension (which can cause critical errors).
+	 */
+	$doc->loadHTML( 
+		'<meta http-equiv="Content-Type" content="text/html; charset=utf-8"><html><body>' . $html . '</body></html>', 
+		LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD 
+	);
 	libxml_clear_errors();
 
 	$featured_set = has_post_thumbnail( $post_id );
@@ -170,7 +206,15 @@ function ia_beacon_localize_media_in_content(
 		}
 	}
 
-	return $doc->saveHTML();
+	/* Extract the body content without the wrapper tags */
+	if ( $doc->getElementsByTagName( 'body' )->length > 0 ) {
+		$clean = $doc->saveHTML( $doc->getElementsByTagName( 'body' )->item( 0 ) );
+		$clean = preg_replace( '~^<body>|</body>$~', '', $clean );
+	} else {
+		$clean = $doc->saveHTML();
+	}
+
+	return $clean;
 }
 
 /* ------------------------------------------------------------------ */
